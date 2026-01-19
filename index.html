@@ -3,15 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>樂富自行車-體感挑戰</title>
+    <title>樂富自行車-專業體感版</title>
     <link rel="manifest" href="manifest.json">
     <style>
         body { margin: 0; background: #050510; color: #fff; overflow: hidden; font-family: sans-serif; touch-action: none; }
         canvas { display: block; background: radial-gradient(circle, #1a1a2e 0%, #050510 100%); }
-        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; font-size: 18px; font-weight: bold; text-shadow: 2px 2px 4px #000; }
-        #menu { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.9); z-index: 1000; }
-        .box { background: #16213e; padding: 25px; border-radius: 20px; border: 3px solid #00ff00; text-align: center; width: 85%; max-width: 400px; box-shadow: 0 0 30px rgba(0,255,0,0.3); }
-        button { background: #00ff00; border: none; padding: 15px 40px; font-size: 24px; font-weight: bold; border-radius: 12px; cursor: pointer; color: #000; margin-top: 20px; width: 100%; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 10; font-size: 20px; font-weight: bold; text-shadow: 2px 2px 4px #000; pointer-events: none; }
+        #menu { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.92); z-index: 1000; }
+        .box { background: #16213e; padding: 35px; border-radius: 25px; border: 3px solid #00ff00; text-align: center; width: 85%; max-width: 400px; box-shadow: 0 0 40px rgba(0,255,0,0.4); }
+        h1 { color: #fdbb2d; margin: 0 0 15px; font-size: 32px; }
+        button { background: #00ff00; border: none; padding: 18px 0; font-size: 26px; font-weight: bold; border-radius: 15px; cursor: pointer; color: #000; width: 100%; box-shadow: 0 6px 0 #008800; }
+        button:active { transform: translateY(4px); box-shadow: none; }
         .brand { color: #fdbb2d; font-weight: bold; }
     </style>
 </head>
@@ -19,76 +21,112 @@
     <div id="ui">關卡: <span id="lvl">1</span> | 分數: <span id="s">0</span> | 生命: <span id="l">3</span></div>
     <div id="menu">
         <div class="box">
-            <h1>樂富自行車<br>體感接星星</h1>
-            <p>請點擊按鈕開啟音效與體感<br>(若有提示請點選「允許」)</p>
-            <button id="start-btn">開始挑戰</button>
-            <p style="margin-top:20px; font-size:14px; color:#888;">專業開發：<span class="brand">樂富自行車</span></p>
+            <h1 id="m-t">樂富自行車<br>專業體感挑戰</h1>
+            <p style="color: #00ff00; font-weight: bold;">[請確認手機未開啟靜音模式]</p>
+            <p>傾斜手機控制移動<br>若有授權提示請點選「允許」</p>
+            <button id="start-btn">啟動遊戲</button>
+            <p style="margin-top:20px; font-size:14px; color:#888;">專屬開發：<span class="brand">樂富自行車</span></p>
         </div>
     </div>
     <canvas id="c"></canvas>
 <script>
-    const cvs=document.getElementById('c'), ctx=cvs.getContext('2d'), sE=document.getElementById('s'), lE=document.getElementById('l'), lvE=document.getElementById('lvl'), m=document.getElementById('menu'), btn=document.getElementById('start-btn');
-    let score=0, lives=3, level=1, running=false, stars=[], p={x:0, w:100}, tilt=0, aCtx=null, timeLeft=15;
+    const cvs=document.getElementById('c'), ctx=cvs.getContext('2d'), sE=document.getElementById('s'), lE=document.getElementById('l'), lvE=document.getElementById('lvl'), m=document.getElementById('menu'), btn=document.getElementById('start-btn'), mt=document.getElementById('m-t');
+    
+    let score=0, lives=3, level=1, running=false, stars=[], p={x:0, w:110, v:0}, tilt=0, aCtx=null, timeLeft=15;
 
     function resize(){ cvs.width=window.innerWidth; cvs.height=window.innerHeight; p.x=cvs.width/2-p.w/2; }
     window.onresize=resize; resize();
 
-    function playNote(f, d=0.2) {
+    // --- 超低延遲音訊系統 ---
+    function playNote(f, type='sine', d=0.15, vol=0.1) {
         if(!aCtx) return;
-        const o=aCtx.createOscillator(), g=aCtx.createGain();
-        o.frequency.value=f; g.gain.setValueAtTime(0.1, aCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.01, aCtx.currentTime+d);
-        o.connect(g); g.connect(aCtx.destination);
-        o.start(); o.stop(aCtx.currentTime+d);
+        try {
+            const o=aCtx.createOscillator(), g=aCtx.createGain();
+            o.type=type; o.frequency.setValueAtTime(f, aCtx.currentTime);
+            g.gain.setValueAtTime(vol, aCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, aCtx.currentTime+d);
+            o.connect(g); g.connect(aCtx.destination);
+            o.start(); o.stop(aCtx.currentTime+d);
+        } catch(e){}
+    }
+
+    // 解決遲鈍感的關鍵：加速度算法
+    function handleDevOri(e) {
+        let rawTilt = e.gamma; // 左右傾斜角度
+        if(rawTilt !== null) {
+            // 轉化為平滑的加速度
+            tilt = rawTilt * 0.8; 
+        }
     }
 
     btn.onclick = async () => {
-        if(!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if(aCtx.state==='suspended') await aCtx.resume();
-        
+        // 1. 強制解鎖音訊
+        aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(aCtx.state === 'suspended') await aCtx.resume();
+        playNote(523, 'sine', 0.1, 0.01); // 預熱
+
+        // 2. 請求高頻率傳感器權限
         if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
             try {
                 const res = await DeviceOrientationEvent.requestPermission();
-                if(res==='granted') window.addEventListener('deviceorientation', e => tilt=e.gamma*1.5);
-            } catch(e) { alert("需授權感應器方可遊玩"); }
+                if(res==='granted') window.addEventListener('deviceorientation', handleDevOri);
+            } catch(e){ alert("請授權感應器以獲得最佳體驗"); }
         } else {
-            window.addEventListener('deviceorientation', e => tilt=e.gamma*1.5);
+            window.addEventListener('deviceorientation', handleDevOri);
         }
         
-        score=0; lives=3; level=1; timeLeft=15; p.w=100; stars=[]; running=true; m.style.display='none';
-        playNote(440);
+        // 3. 重置
+        score=0; lives=3; level=1; timeLeft=15; p.w=110; p.v=0; stars=[];
+        sE.innerText=0; lE.innerText=3; lvE.innerText=1;
+        running=true; m.style.display='none';
     };
 
+    // 關卡計時
     setInterval(() => {
         if(!running) return;
         timeLeft--;
-        if(timeLeft<=0) { level++; timeLeft=15; lvE.innerText=level; playNote(800); }
+        if(timeLeft<=0) { level++; timeLeft=15; lvE.innerText=level; playNote(880, 'square', 0.3, 0.1); }
     }, 1000);
 
     function spawnLoop(){
         if(running){
-            const r=Math.random(), t=r>0.8?'b':(r>0.6?'r':'g');
+            const r=Math.random(), t=r>0.85?'b':(r>0.7?'r':'g');
             stars.push({x:Math.random()*(cvs.width-20), y:-20, t:t, c:t=='b'?'#00ff00':(t=='r'?'#ff4757':'#fdbb2d')});
         }
-        setTimeout(spawnLoop, 1000 - (level*50));
+        setTimeout(spawnLoop, Math.max(250, 1000 - level*65));
     }
 
     function loop(){
         ctx.clearRect(0,0,cvs.width,cvs.height);
         if(running){
-            p.x += tilt;
-            p.x = Math.max(0, Math.min(cvs.width-p.w, p.x));
-            ctx.fillStyle='#fff'; ctx.fillRect(p.x, cvs.height-60, p.w, 15);
+            // 物理補償邏輯：讓移動更有自行車的慣性與流暢感
+            p.v += tilt * 0.12; // 加速度
+            p.v *= 0.85; // 摩擦力，防止暴走
+            p.x += p.v;
+
+            if(p.x < 0) { p.x=0; p.v=0; }
+            if(p.x > cvs.width-p.w) { p.x=cvs.width-p.w; p.v=0; }
+
+            // 繪製
+            ctx.fillStyle='#fff';
+            ctx.shadowBlur=15; ctx.shadowColor='#00ff00';
+            ctx.fillRect(p.x, cvs.height-70, p.w, 18);
+            ctx.shadowBlur=0;
+
             for(let i=stars.length-1; i>=0; i--){
-                let s=stars[i]; s.y += (3 + level*0.5);
-                ctx.fillStyle=s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, Math.PI*2); ctx.fill();
-                if(s.y>cvs.height-65 && s.y<cvs.height-45 && s.x>p.x && s.x<p.x+p.w){
-                    if(s.t=='g') { score+=10; playNote(600); }
-                    else if(s.t=='r') { p.w=Math.min(250, p.w*1.2); playNote(400); }
-                    else { p.w=Math.max(40, p.w*0.5); score=Math.max(0, score-30); playNote(200); }
+                let s=stars[i]; s.y += (3.5 + level*0.6);
+                ctx.fillStyle=s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 14, 0, Math.PI*2); ctx.fill();
+                
+                if(s.y>cvs.height-75 && s.y<cvs.height-50 && s.x>p.x && s.x<p.x+p.w){
+                    if(s.t=='g') { score+=10; playNote(659); }
+                    else if(s.t=='r') { p.w=Math.min(280, p.w*1.2); playNote(523); }
+                    else { p.w=Math.max(45, p.w*0.5); score=Math.max(0, score-30); playNote(174, 'sawtooth', 0.4); }
                     sE.innerText=score; stars.splice(i,1);
                 } else if(s.y>cvs.height){
-                    if(s.t=='g'){ lives--; lE.innerText=lives; if(lives<=0) { running=false; m.style.display='flex'; } }
+                    if(s.t=='g'){ 
+                        lives--; lE.innerText=lives; playNote(110, 'sawtooth', 0.3);
+                        if(lives<=0) { running=false; m.style.display='flex'; mt.innerText="挑戰結束 分數:"+score; }
+                    }
                     stars.splice(i,1);
                 }
             }
