@@ -23,10 +23,10 @@
     <div id="menu">
         <div class="box">
             <h1>樂富自行車<br>專業體感挑戰</h1>
-            <p style="color:#00ff00; font-weight:bold;">⚠️ 請關閉手機靜音模式 ⚠️</p>
-            <button id="start-btn">啟動遊戲</button>
+            <p style="color:#00ff00; font-weight:bold;">⚠️ 請解除手機靜音模式 ⚠️</p>
+            <button id="start-btn">開始遊戲</button>
             <div class="hint">
-                由 <span class="brand">樂富自行車</span> 開發<br>
+                由 <span class="brand">樂富自行車</span> 專業開發<br>
                 提示：傾斜手機左右控制移動
             </div>
         </div>
@@ -40,9 +40,9 @@
     function resize(){ cvs.width=window.innerWidth; cvs.height=window.innerHeight; p.x=cvs.width/2-p.w/2; }
     window.onresize=resize; resize();
 
-    // --- 強化音訊系統 (解決沒聲音問題) ---
-    function playNote(f, type='sine', d=0.15, vol=0.15) {
-        if(!aCtx) return;
+    // --- 強化音訊系統 (音效 + 背景音樂) ---
+    function playNote(f, type='sine', d=0.15, vol=0.1) {
+        if(!aCtx || aCtx.state === 'closed') return;
         try {
             const o=aCtx.createOscillator(), g=aCtx.createGain();
             o.type=type; o.frequency.setValueAtTime(f, aCtx.currentTime);
@@ -53,18 +53,29 @@
         } catch(e){}
     }
 
-    // --- 平滑運動控制 ---
+    // 背景音樂節奏邏輯 (模擬自行車前進節奏)
+    let bgmStep = 0;
+    function playBGM() {
+        if(!running) return;
+        const notes = [261.63, 329.63, 392.00, 523.25]; // C, E, G, C
+        const f = notes[bgmStep % notes.length];
+        playNote(f, 'triangle', 0.4, 0.03); // 低音量背景節奏
+        bgmStep++;
+        setTimeout(playBGM, 500 - (level * 20)); // 隨著關卡變快
+    }
+
+    // --- 平滑運動控制 (解決遲鈍感) ---
     function handleDevOri(e) {
-        if(e.gamma !== null) tilt = e.gamma * 0.9; 
+        if(e.gamma !== null) tilt = e.gamma * 1.2; // 稍微調高靈敏度
     }
 
     btn.onclick = async () => {
-        // 1. 啟動 AudioContext
-        aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // 1. 初始化音訊
+        if(!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
         if(aCtx.state === 'suspended') await aCtx.resume();
-        playNote(523, 'sine', 0.1, 0.01); // 預熱啟動
+        playNote(523, 'sine', 0.1, 0.05);
 
-        // 2. 授權傳感器
+        // 2. 授權感應器
         if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
             try {
                 const res = await DeviceOrientationEvent.requestPermission();
@@ -74,19 +85,22 @@
             window.addEventListener('deviceorientation', handleDevOri);
         }
         
-        // 3. 遊戲重置
+        // 3. 遊戲啟動
         score=0; lives=3; level=1; timeLeft=15; p.w=110; p.v=0; stars=[];
         sE.innerText=0; lE.innerText=3; lvE.innerText=1;
         running=true; m.style.display='none';
+        
+        playBGM(); // 啟動背景音樂
         spawnLoop();
     };
 
+    // 關卡計時
     setInterval(() => {
         if(!running) return;
         timeLeft--;
         if(timeLeft<=0) { 
             level++; timeLeft=15; lvE.innerText=level; 
-            playNote(880, 'square', 0.3, 0.1); // 升級音效
+            playNote(880, 'square', 0.5, 0.1); 
         }
     }, 1000);
 
@@ -94,15 +108,15 @@
         if(!running) return;
         const r=Math.random(), t=r>0.85?'b':(r>0.7?'r':'g');
         stars.push({x:Math.random()*(cvs.width-20), y:-20, t:t, c:t=='b'?'#00ff00':(t=='r'?'#ff4757':'#fdbb2d')});
-        setTimeout(spawnLoop, Math.max(250, 1000 - level*65));
+        setTimeout(spawnLoop, Math.max(200, 1000 - level*70));
     }
 
     function loop(){
         ctx.clearRect(0,0,cvs.width,cvs.height);
         if(running){
-            // 物理慣性算法：解決遲鈍感
-            p.v += tilt * 0.15; // 加速度
-            p.v *= 0.88; // 模擬自行車摩擦阻力
+            // 物理運動補償 (加入平滑慣性，解決遲鈍感)
+            p.v += tilt * 0.18; // 增加加速度感
+            p.v *= 0.85; // 阻尼感
             p.x += p.v;
 
             if(p.x < 0) { p.x=0; p.v=0; }
@@ -114,17 +128,17 @@
             ctx.shadowBlur=0;
 
             for(let i=stars.length-1; i>=0; i--){
-                let s=stars[i]; s.y += (3.5 + level*0.6);
+                let s=stars[i]; s.y += (3.5 + level*0.7);
                 ctx.fillStyle=s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 14, 0, Math.PI*2); ctx.fill();
                 
                 if(s.y>cvs.height-75 && s.y<cvs.height-50 && s.x>p.x && s.x<p.x+p.w){
-                    if(s.t=='g') { score+=10; playNote(659); }
-                    else if(s.t=='r') { p.w=Math.min(280, p.w*1.2); playNote(523); }
-                    else { p.w=Math.max(45, p.w*0.5); score=Math.max(0, score-30); playNote(174, 'sawtooth', 0.4); }
+                    if(s.t=='g') { score+=10; playNote(659, 'sine', 0.1, 0.2); }
+                    else if(s.t=='r') { p.w=Math.min(cvs.width*0.8, p.w*1.2); playNote(523, 'sine', 0.1, 0.2); }
+                    else { p.w=Math.max(45, p.w*0.5); score=Math.max(0, score-30); playNote(174, 'sawtooth', 0.4, 0.3); }
                     sE.innerText=score; stars.splice(i,1);
                 } else if(s.y>cvs.height){
                     if(s.t=='g'){ 
-                        lives--; lE.innerText=lives; playNote(110, 'sawtooth', 0.3);
+                        lives--; lE.innerText=lives; playNote(110, 'sawtooth', 0.3, 0.4);
                         if(lives<=0) { running=false; m.style.display='flex'; document.getElementById('m-t').innerText="挑戰結束 分數:"+score; }
                     }
                     stars.splice(i,1);
