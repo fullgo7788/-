@@ -5,15 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>樂富自行車-接星星</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3132/3132644.png">
     <style>
         body { margin: 0; background: #050510; color: #fff; overflow: hidden; font-family: sans-serif; touch-action: none; }
         canvas { display: block; background: radial-gradient(circle, #1a1a2e 0%, #050510 100%); }
-        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; font-weight: bold; text-shadow: 2px 2px 4px #000; pointer-events: none; }
-        #menu { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.85); z-index: 1000; }
-        .box { background: #16213e; padding: 30px; border-radius: 20px; border: 3px solid #00ff00; text-align: center; min-width: 280px; box-shadow: 0 0 30px rgba(0,255,0,0.3); }
-        h1 { color: #fdbb2d; margin: 0 0 10px; }
-        button { background: #00ff00; border: none; padding: 15px 40px; font-size: 24px; font-weight: bold; border-radius: 12px; cursor: pointer; color: #000; }
+        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; font-size: 18px; font-weight: bold; text-shadow: 2px 2px 4px #000; pointer-events: none; }
+        #menu { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.9); z-index: 1000; }
+        .box { background: #16213e; padding: 30px; border-radius: 20px; border: 3px solid #00ff00; text-align: center; width: 80%; box-shadow: 0 0 30px rgba(0,255,0,0.3); }
+        h1 { color: #fdbb2d; margin-top: 0; }
+        button { background: #00ff00; border: none; padding: 15px 40px; font-size: 24px; font-weight: bold; border-radius: 12px; cursor: pointer; color: #000; margin: 10px 0; }
         .brand { color: #fdbb2d; font-weight: bold; font-size: 1.2em; }
     </style>
 </head>
@@ -21,36 +20,73 @@
     <div id="ui">關卡: <span id="lvl">1</span>/10 | 分數: <span id="s">0</span> | 生命: <span id="l">3</span></div>
     <div id="menu">
         <div class="box">
-            <h1 id="m-t">體感接星星</h1>
-            <p>傾斜手機控制移動<br><span style="color:#00ff00">🟢 綠球：縮短且扣30分</span></p>
-            <button id="start-btn">開始遊戲</button>
-            <p style="border-top:1px solid #333; padding-top:10px;">由 <span class="brand">樂富自行車</span> 開發</p>
+            <h1 id="m-t">樂富自行車<br>體感接星星</h1>
+            <p>請點擊下方按鈕啟動體感與音效<br>(請依提示點選「允許」)</p>
+            <button id="start-btn">開啟體感並開始</button>
+            <div style="border-top: 1px solid #333; margin-top: 15px; padding-top: 10px;">開發單位：<span class="brand">樂富自行車</span></div>
         </div>
     </div>
     <canvas id="c"></canvas>
 <script>
     const cvs=document.getElementById('c'), ctx=cvs.getContext('2d'), sE=document.getElementById('s'), lE=document.getElementById('l'), lvE=document.getElementById('lvl'), m=document.getElementById('menu'), btn=document.getElementById('start-btn'), mt=document.getElementById('m-t');
-    let score=0, lives=3, level=1, running=false, stars=[], p={x:0, w:100}, tilt=0, aCtx=null;
+    let score=0, lives=3, level=1, running=false, stars=[], p={x:0, w:100}, tilt=0, aCtx=null, timeLeft=15;
 
     function resize(){ cvs.width=window.innerWidth; cvs.height=window.innerHeight; p.x=cvs.width/2-p.w/2; }
     window.onresize=resize; resize();
 
-    function handleOrientation(e){ if(e.gamma!==null) tilt = e.gamma * 1.5; }
+    function playSound(freq) {
+        if(!aCtx) return;
+        const o=aCtx.createOscillator(), g=aCtx.createGain();
+        o.type='sine'; o.frequency.value=freq;
+        g.gain.setValueAtTime(0.1, aCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.01, aCtx.currentTime + 0.2);
+        o.connect(g); g.connect(aCtx.destination);
+        o.start(); o.stop(aCtx.currentTime + 0.2);
+    }
 
     btn.onclick = async () => {
+        // 初始化音效
         if(!aCtx) aCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(aCtx.state === 'suspended') aCtx.resume();
+        
+        // 請求陀螺儀權限
         if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
-            await DeviceOrientationEvent.requestPermission();
+            try {
+                const res = await DeviceOrientationEvent.requestPermission();
+                if(res === 'granted') window.addEventListener('deviceorientation', e => tilt = e.gamma * 1.5);
+            } catch(e) { alert("請允許感應器權限以玩遊戲"); }
+        } else {
+            window.addEventListener('deviceorientation', e => tilt = e.gamma * 1.5);
         }
-        window.addEventListener('deviceorientation', handleOrientation);
-        score=0; lives=3; level=1; p.w=100; stars=[]; running=true; m.style.display='none';
+
+        // 開始遊戲
+        score=0; lives=3; level=1; timeLeft=15; p.w=100; stars=[]; running=true; m.style.display='none';
+        startTimer();
     };
 
-    function spawn(){
-        if(!running) return;
-        const r=Math.random(), t=r>0.8?'b':(r>0.65?'r':'g');
-        stars.push({x:Math.random()*(cvs.width-20), y:-20, t:t, c:t=='b'?'#00ff00':(t=='r'?'#ff4757':'#fdbb2d')});
-        setTimeout(spawn, 1000 - (level*50));
+    function startTimer() {
+        setInterval(() => {
+            if(!running) return;
+            timeLeft--;
+            if(timeLeft <= 0) {
+                if(level < 10) { level++; timeLeft=15; lvE.innerText=level; playSound(800); }
+                else { gameWin(); }
+            }
+        }, 1000);
+    }
+
+    function gameWin() {
+        running=false; m.style.display='flex';
+        mt.innerHTML = "<span style='color:#00ff00'>恭喜破關！</span>";
+        btn.innerText = "再玩一次";
+    }
+
+    function spawnLoop(){
+        if(running){
+            const r=Math.random(), t=r>0.85?'b':(r>0.7?'r':'g');
+            stars.push({x:Math.random()*(cvs.width-20), y:-20, t:t, c:t=='b'?'#00ff00':(t=='r'?'#ff4757':'#fdbb2d')});
+        }
+        setTimeout(spawnLoop, Math.max(300, 1000 - level*50));
     }
 
     function loop(){
@@ -60,22 +96,22 @@
             p.x = Math.max(0, Math.min(cvs.width-p.w, p.x));
             ctx.fillStyle='#fff'; ctx.fillRect(p.x, cvs.height-60, p.w, 15);
             for(let i=stars.length-1; i>=0; i--){
-                let s=stars[i]; s.y += 4 + level*0.5;
+                let s=stars[i]; s.y += (3 + level*0.5);
                 ctx.fillStyle=s.c; ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, Math.PI*2); ctx.fill();
                 if(s.y>cvs.height-65 && s.y<cvs.height-45 && s.x>p.x && s.x<p.x+p.w){
-                    if(s.t=='g') score+=10;
-                    else if(s.t=='r') p.w=Math.min(200, p.w*1.2);
-                    else { p.w=Math.max(40, p.w*0.5); score=Math.max(0, score-30); }
+                    if(s.t=='g') { score+=10; playSound(600); }
+                    else if(s.t=='r') { p.w=Math.min(250, p.w*1.2); playSound(400); }
+                    else { p.w=Math.max(40, p.w*0.5); score=Math.max(0, score-30); playSound(200); }
                     sE.innerText=score; stars.splice(i,1);
                 } else if(s.y>cvs.height){
-                    if(s.t=='g'){ lives--; lE.innerText=lives; if(lives<=0){ running=false; m.style.display='flex'; mt.innerText="遊戲結束 Score:"+score; } }
+                    if(s.t=='g'){ lives--; lE.innerText=lives; if(lives<=0){ running=false; m.style.display='flex'; mt.innerText="挑戰失敗 Score:"+score; } }
                     stars.splice(i,1);
                 }
             }
         }
         requestAnimationFrame(loop);
     }
-    spawn(); loop();
+    spawnLoop(); loop();
 </script>
 </body>
 </html>
